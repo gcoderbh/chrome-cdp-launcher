@@ -30,6 +30,42 @@ function getCdpProfiles() {
         .map(e => ({ name: e.name, value: e.name }));
 }
 
+function showHelp() {
+    console.log(`
+\x1b[36m===================================================\x1b[0m
+\x1b[1m🤖 Chrome CDP Isolated Profile Manager\x1b[0m
+\x1b[36m===================================================\x1b[0m
+
+\x1b[33mDescription:\x1b[0m
+  A powerful CLI tool to launch completely isolated 
+  Google Chrome profiles with an exposed Chrome DevTools 
+  Protocol (CDP) debugging port.
+
+  Perfect for AI agents (Antigravity, Playwright, Puppeteer) 
+  to automate tasks without interfering with your personal 
+  Chrome data!
+
+\x1b[33mUsage:\x1b[0m
+  \x1b[32mchrome-cdp-launcher\x1b[0m [options]
+
+\x1b[33mOptions:\x1b[0m
+  \x1b[32m-h, --help\x1b[0m     Show this beautiful help message
+
+\x1b[33mStorage Locations:\x1b[0m
+  \x1b[34mmacOS:\x1b[0m   ~/Library/Application Support/Chrome_CDP
+  \x1b[34mWindows:\x1b[0m ~\\AppData\\Local\\Chrome_CDP
+  \x1b[34mLinux:\x1b[0m   ~/.config/Chrome_CDP
+
+\x1b[36m===================================================\x1b[0m
+`);
+    process.exit(0);
+}
+
+const args = process.argv.slice(2);
+if (args.includes('--help') || args.includes('-h')) {
+    showHelp();
+}
+
 async function run() {
     console.log("🤖 Chrome CDP Isolated Profile Manager\n");
     
