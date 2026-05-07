@@ -84,16 +84,25 @@ async function run() {
         validate: value => !isNaN(parseInt(value)) || 'Please enter a valid port number'
     });
 
+    const isHeadless = await confirm({
+        message: 'Run Chrome in Headless mode (invisible background process)?',
+        default: false
+    });
+
     console.log(`\n🚀 Launching Isolated Chrome on Port ${port} for Profile '${selectedProfile}'...`);
+    if (isHeadless) {
+        console.log(`👻 Running in HEADLESS mode. You will not see the browser window.`);
+    }
     
     const profilePath = path.join(CDP_BASE_DIR, selectedProfile);
+    const headlessFlag = isHeadless ? ' --headless=new' : '';
     
     // Launch Chrome using the configured executable path
     let cmd;
     if (os.platform() === 'win32') {
-        cmd = `start "" "${config.chromeExecutablePath}" --remote-debugging-port=${port} --user-data-dir="${profilePath}" --no-first-run --no-default-browser-check --lang=en-US`;
+        cmd = `start "" "${config.chromeExecutablePath}" --remote-debugging-port=${port} --user-data-dir="${profilePath}" --no-first-run --no-default-browser-check --lang=en-US${headlessFlag}`;
     } else {
-        cmd = `"${config.chromeExecutablePath}" --remote-debugging-port=${port} --user-data-dir="${profilePath}" --no-first-run --no-default-browser-check --lang=en-US > /dev/null 2>&1 &`;
+        cmd = `"${config.chromeExecutablePath}" --remote-debugging-port=${port} --user-data-dir="${profilePath}" --no-first-run --no-default-browser-check --lang=en-US${headlessFlag} > /dev/null 2>&1 &`;
     }
     
     await execAsync(cmd);
