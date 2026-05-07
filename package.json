@@ -1,6 +1,6 @@
 {
   "name": "chrome-cdp-launcher",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "CLI tool to launch isolated Chrome instances for CDP (Chrome DevTools Protocol) automation.",
   "main": "cli.js",
   "bin": {
