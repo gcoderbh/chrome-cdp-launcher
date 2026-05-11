@@ -30,6 +30,7 @@
   "type": "module",
   "dependencies": {
     "@inquirer/prompts": "^8.4.2",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "ws": "^8.20.0"
   }
 }

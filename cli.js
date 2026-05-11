@@ -7,6 +7,7 @@ import { promisify } from 'util';
 import { select, input, confirm } from '@inquirer/prompts';
 import { getConfig, saveConfig } from './config.js';
 import { promptForChromePath } from './chromeLocator.js';
+import WebSocket from 'ws';
 
 const execAsync = promisify(exec);
 
@@ -136,6 +137,40 @@ async function run() {
     
     // Optional delay to ensure port binds
     await new Promise(r => setTimeout(r, 1500));
+    
+    // Automatically enable downloads for the default page
+    try {
+        const res = await fetch(`http://127.0.0.1:${port}/json/list`);
+        if (res.ok) {
+            const targets = await res.json();
+            const page = targets.find(t => t.type === 'page');
+            if (page && page.webSocketDebuggerUrl) {
+                const ws = new WebSocket(page.webSocketDebuggerUrl);
+                ws.on('open', () => {
+                    ws.send(JSON.stringify({
+                        id: 1,
+                        method: "Page.setDownloadBehavior",
+                        params: {
+                            behavior: "allow",
+                            downloadPath: path.join(os.homedir(), 'Downloads')
+                        }
+                    }));
+                });
+                ws.on('message', (data) => {
+                    const response = JSON.parse(data.toString());
+                    if (response.id === 1) {
+                        console.log(`📥 Downloads explicitly allowed to: ${path.join(os.homedir(), 'Downloads')}`);
+                        ws.close();
+                    }
+                });
+                ws.on('error', () => {
+                    ws.close();
+                });
+            }
+        }
+    } catch (e) {
+        // Silently fail if we can't connect, let the user proceed
+    }
     
     console.log(`\n✅ Isolated Chrome CDP started successfully!`);
     console.log(`📂 Profile Data Stored at: ${profilePath}\n`);
