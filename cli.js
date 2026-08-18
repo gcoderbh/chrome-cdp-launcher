@@ -62,6 +62,155 @@ function showHelp() {
     process.exit(0);
 }
 
+function setupProfilePreferences(profilePath, downloadPath) {
+    try {
+        const defaultDir = path.join(profilePath, 'Default');
+        if (!fs.existsSync(defaultDir)) {
+            fs.mkdirSync(defaultDir, { recursive: true });
+        }
+        const prefFile = path.join(defaultDir, 'Preferences');
+        let prefs = {};
+        if (fs.existsSync(prefFile)) {
+            try {
+                prefs = JSON.parse(fs.readFileSync(prefFile, 'utf-8'));
+            } catch (e) {
+                prefs = {};
+            }
+        }
+
+        prefs.download = prefs.download || {};
+        prefs.download.default_directory = downloadPath;
+        prefs.download.prompt_for_download = false;
+        prefs.download.directory_upgrade = true;
+        prefs.download.extensions_to_open = prefs.download.extensions_to_open || '';
+
+        prefs.savefile = prefs.savefile || {};
+        prefs.savefile.default_directory = downloadPath;
+
+        prefs.profile = prefs.profile || {};
+        prefs.profile.default_content_setting_values = prefs.profile.default_content_setting_values || {};
+        prefs.profile.default_content_setting_values.automatic_downloads = 1;
+
+        prefs.profile.content_settings = prefs.profile.content_settings || {};
+        prefs.profile.content_settings.exceptions = prefs.profile.content_settings.exceptions || {};
+        prefs.profile.content_settings.exceptions.automatic_downloads = {
+            "*,*": { "setting": 1 }
+        };
+
+        fs.writeFileSync(prefFile, JSON.stringify(prefs, null, 2), 'utf-8');
+    } catch (e) {
+        console.error('⚠️  Failed to preconfigure profile preferences:', e.message);
+    }
+}
+
+async function enableCdpDownloads(port, downloadPath) {
+    const startTime = Date.now();
+    const timeoutMs = 8000;
+
+    while (Date.now() - startTime < timeoutMs) {
+        try {
+            let configured = false;
+
+            // 1. Browser-level download behavior
+            try {
+                const versionRes = await fetch(`http://127.0.0.1:${port}/json/version`);
+                if (versionRes.ok) {
+                    const versionData = await versionRes.json();
+                    if (versionData.webSocketDebuggerUrl) {
+                        await new Promise((resolve) => {
+                            const ws = new WebSocket(versionData.webSocketDebuggerUrl);
+                            let resolved = false;
+                            const finish = () => {
+                                if (!resolved) {
+                                    resolved = true;
+                                    try { ws.close(); } catch (_) {}
+                                    resolve();
+                                }
+                            };
+                            ws.on('open', () => {
+                                ws.send(JSON.stringify({
+                                    id: 101,
+                                    method: "Browser.setDownloadBehavior",
+                                    params: {
+                                        behavior: "allow",
+                                        downloadPath: downloadPath,
+                                        eventsEnabled: true
+                                    }
+                                }));
+                            });
+                            ws.on('message', (data) => {
+                                try {
+                                    const msg = JSON.parse(data.toString());
+                                    if (msg.id === 101) {
+                                        configured = true;
+                                        finish();
+                                    }
+                                } catch (_) {
+                                    finish();
+                                }
+                            });
+                            ws.on('error', finish);
+                            setTimeout(finish, 1500);
+                        });
+                    }
+                }
+            } catch (_) {}
+
+            // 2. Page-level download behavior for all existing pages
+            try {
+                const listRes = await fetch(`http://127.0.0.1:${port}/json/list`);
+                if (listRes.ok) {
+                    const targets = await listRes.json();
+                    const pages = targets.filter(t => t.type === 'page' && t.webSocketDebuggerUrl);
+                    for (const page of pages) {
+                        await new Promise((resolve) => {
+                            const ws = new WebSocket(page.webSocketDebuggerUrl);
+                            let resolved = false;
+                            const finish = () => {
+                                if (!resolved) {
+                                    resolved = true;
+                                    try { ws.close(); } catch (_) {}
+                                    resolve();
+                                }
+                            };
+                            ws.on('open', () => {
+                                ws.send(JSON.stringify({
+                                    id: 102,
+                                    method: "Page.setDownloadBehavior",
+                                    params: {
+                                        behavior: "allow",
+                                        downloadPath: downloadPath
+                                    }
+                                }));
+                            });
+                            ws.on('message', (data) => {
+                                try {
+                                    const msg = JSON.parse(data.toString());
+                                    if (msg.id === 102) {
+                                        configured = true;
+                                        finish();
+                                    }
+                                } catch (_) {
+                                    finish();
+                                }
+                            });
+                            ws.on('error', finish);
+                            setTimeout(finish, 1000);
+                        });
+                    }
+                }
+            } catch (_) {}
+
+            if (configured) {
+                return true;
+            }
+        } catch (_) {}
+
+        await new Promise(r => setTimeout(r, 400));
+    }
+    return false;
+}
+
 const args = process.argv.slice(2);
 if (args.includes('--help') || args.includes('-h')) {
     showHelp();
@@ -124,6 +273,14 @@ async function run() {
     console.log(`\n🚀 Launching Isolated Chrome on Port ${port} for Profile '${selectedProfile}'...`);
     
     const profilePath = path.join(CDP_BASE_DIR, selectedProfile);
+    const downloadPath = config.downloadPath || path.join(os.homedir(), 'Downloads');
+
+    if (!fs.existsSync(downloadPath)) {
+        fs.mkdirSync(downloadPath, { recursive: true });
+    }
+
+    // Preconfigure Chrome profile preferences for downloads
+    setupProfilePreferences(profilePath, downloadPath);
     
     // Launch Chrome using the configured executable path
     let cmd;
@@ -135,45 +292,12 @@ async function run() {
     
     await execAsync(cmd);
     
-    // Optional delay to ensure port binds
-    await new Promise(r => setTimeout(r, 1500));
-    
-    // Automatically enable downloads for the default page
-    try {
-        const res = await fetch(`http://127.0.0.1:${port}/json/list`);
-        if (res.ok) {
-            const targets = await res.json();
-            const page = targets.find(t => t.type === 'page');
-            if (page && page.webSocketDebuggerUrl) {
-                const ws = new WebSocket(page.webSocketDebuggerUrl);
-                ws.on('open', () => {
-                    ws.send(JSON.stringify({
-                        id: 1,
-                        method: "Page.setDownloadBehavior",
-                        params: {
-                            behavior: "allow",
-                            downloadPath: path.join(os.homedir(), 'Downloads')
-                        }
-                    }));
-                });
-                ws.on('message', (data) => {
-                    const response = JSON.parse(data.toString());
-                    if (response.id === 1) {
-                        console.log(`📥 Downloads explicitly allowed to: ${path.join(os.homedir(), 'Downloads')}`);
-                        ws.close();
-                    }
-                });
-                ws.on('error', () => {
-                    ws.close();
-                });
-            }
-        }
-    } catch (e) {
-        // Silently fail if we can't connect, let the user proceed
-    }
+    // Configure CDP browser-level & page-level download behavior
+    await enableCdpDownloads(port, downloadPath);
     
     console.log(`\n✅ Isolated Chrome CDP started successfully!`);
-    console.log(`📂 Profile Data Stored at: ${profilePath}\n`);
+    console.log(`📂 Profile Data Stored at: ${profilePath}`);
+    console.log(`📥 Download Folder: ${downloadPath}\n`);
 }
 
 run().catch(console.error);
